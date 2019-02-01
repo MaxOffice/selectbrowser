@@ -4,14 +4,20 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
+	"strings"
+	"time"
 
 	"golang.org/x/sys/windows/registry"
 )
 
 var iePath string     //:= `C:\Program Files\Internet Explorer\IEXPLORE.EXE`
 var chromePath string //:= `C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`
+var defaultbrowser string
+var nondefaulthosts string
 
 func trimQuotes(s string) string {
 	if len(s) >= 2 {
@@ -25,36 +31,41 @@ func trimQuotes(s string) string {
 func initialize() error {
 	startmenuinternet, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Clients\StartMenuInternet`, registry.READ)
 	if err != nil {
-		// Report error somehow
 		return err
 	}
 	defer startmenuinternet.Close()
 
 	chromeopenkey, err := registry.OpenKey(startmenuinternet, `Google Chrome\shell\open\command`, registry.QUERY_VALUE)
 	if err != nil {
-		// Report error somehow
 		return err
 	}
 	defer chromeopenkey.Close()
+
 	chromePath, _, err = chromeopenkey.GetStringValue("")
 	if err != nil {
-		// Report error somehow
 		return err
 	}
 	chromePath = trimQuotes(chromePath)
 
 	ieopenkey, err := registry.OpenKey(startmenuinternet, `IEXPLORE.EXE\shell\open\command`, registry.QUERY_VALUE)
 	if err != nil {
-		// Report error somehow
 		return err
 	}
 	defer ieopenkey.Close()
 	iePath, _, err = ieopenkey.GetStringValue("")
 	if err != nil {
-		// Report error somehow
 		return err
 	}
 	iePath = trimQuotes(iePath)
+
+	defaultbrowser = "IE"
+	nondefaulthosts = "outlook.office.com,sharepoint.com,teams.microsoft.com,www.onenote.com,admin.microsoft.com"
+
+	sburlappkey, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Classes\SBUrl\Application`, registry.QUERY_VALUE)
+	if err == nil {
+		defaultbrowser, _, _ = sburlappkey.GetStringValue("DefaultBrowser")
+		nondefaulthosts, _, _ = sburlappkey.GetStringValue("NonDefaultHosts")
+	}
 
 	return nil
 }
@@ -84,6 +95,8 @@ func register() error {
 
 	sburlappkey.SetStringValue("ApplicationName", "MaxOffice Select Browser")
 	sburlappkey.SetStringValue("ApplicationDescription", "Open specified sites in IE or Chrome")
+	sburlappkey.SetStringValue("DefaultBrowser", "IE")
+	sburlappkey.SetStringValue("NonDefaultHosts", "www.office.com,outlook.office.com,sharepoint.com,teams.microsoft.com,www.onenote.com,admin.microsoft.com")
 
 	sburlcommandkey, _, err := registry.CreateKey(sburlkey, `shell\open\command`, registry.ALL_ACCESS)
 	if err != nil {
@@ -145,6 +158,10 @@ func unregister() error {
 	}
 	defer classesroot.Close()
 
+	err = registry.DeleteKey(classesroot, `SBUrl\shell\open\command`)
+	err = registry.DeleteKey(classesroot, `SBUrl\shell\open`)
+	err = registry.DeleteKey(classesroot, `SBUrl\shell`)
+	err = registry.DeleteKey(classesroot, `SBUrl\Application`)
 	err = registry.DeleteKey(classesroot, `SBUrl`)
 
 	startmenuinternet, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Clients\StartMenuInternet`, registry.ALL_ACCESS)
@@ -166,34 +183,57 @@ func unregister() error {
 	return nil
 }
 
-func invokeChrome(url string) {
-	browser := exec.Command(chromePath, "--", url)
+func invokeChrome(urlToInvoke string) {
+	browser := exec.Command(chromePath, "--", urlToInvoke)
 	err := browser.Start()
 	if err != nil {
 		log.Printf("Error invoking Chrome:%v\n", err)
 	}
 }
 
-func invokeIE(url string) {
-	browser := exec.Command(iePath, url)
+func invokeIE(urlToInvoke string) {
+	browser := exec.Command(iePath, urlToInvoke)
 	err := browser.Start()
 	if err != nil {
 		log.Printf("Error invoking IE:%v\n", err)
 	}
 }
 
-func invokeBrowser(url string) {
-	if url == "http://www.microsoft.com/" || url == "http://www.azure.com/" {
-		fmt.Println("Invoking IE")
-		invokeIE(url)
+func invokeBrowser(urlToInvoke string) {
+	fullURL, err := url.Parse(urlToInvoke)
+	if err != nil {
+		log.Fatal("Invalid url:" + urlToInvoke)
+	}
+
+	invokedHost := strings.ToLower(fullURL.Hostname())
+	nondefault := strings.Contains(nondefaulthosts, invokedHost)
+
+	if defaultbrowser != "IE" {
+		nondefault = !nondefault
+	}
+
+	if nondefault {
+		log.Printf("Invoking Chrome for url:" + urlToInvoke)
+		invokeChrome(urlToInvoke)
 	} else {
-		fmt.Println("Invoking Chrome")
-		invokeChrome(url)
+		log.Printf("Invoking IE for url:" + urlToInvoke)
+		invokeIE(urlToInvoke)
 	}
 }
 
 func main() {
 	var err error
+
+	today := time.Now()
+	logfilename := path.Join(os.Getenv("TEMP"), fmt.Sprintf("selectbrowser-%d-%02d-%02d.log", today.Year(), today.Month(), today.Day()))
+	file, err := os.OpenFile(logfilename, os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer file.Close()
+	log.SetOutput(file)
+
 	var registerflag = flag.Bool("register", false, "Register MaxOffice Select Browser")
 	var unregisterflag = flag.Bool("unregister", false, "Unregister MaxOffice Select Browser")
 
@@ -218,18 +258,7 @@ func main() {
 			}
 
 			var args = os.Args[1:]
-			/*
-				log.Printf("IE:%v  Chrome:%v\n", iePath, chromePath)
-
-				fmt.Println("Some arguments were passed. These are:")
-
-				for i := range args {
-					log.Println(args[i])
-				}
-			*/
-
 			invokeBrowser(args[0])
 		}
-		log.Println("Selection complete.")
 	}
 }
