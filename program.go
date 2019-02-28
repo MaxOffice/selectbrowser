@@ -1,3 +1,7 @@
+// +build windows
+
+//go:generate go get github.com/akavel/rsrc
+//go:generate rsrc -ico selectbrowser.ico -o main.syso
 package main
 
 import (
@@ -85,7 +89,7 @@ func register() error {
 	}
 	defer sburlkey.Close()
 
-	sburlkey.SetStringValue("", "MaxOffice Select Browser URL Handler")
+	sburlkey.SetStringValue("", "MaxOffice SelectBrowser URL Handler")
 
 	sburlappkey, _, err := registry.CreateKey(sburlkey, `Application`, registry.ALL_ACCESS)
 	if err != nil {
@@ -93,7 +97,7 @@ func register() error {
 	}
 	defer sburlappkey.Close()
 
-	sburlappkey.SetStringValue("ApplicationName", "MaxOffice Select Browser")
+	sburlappkey.SetStringValue("ApplicationName", "MaxOffice SelectBrowser")
 	sburlappkey.SetStringValue("ApplicationDescription", "Open specified sites in IE or Chrome")
 	sburlappkey.SetStringValue("DefaultBrowser", "IE")
 	sburlappkey.SetStringValue("NonDefaultHosts", "www.office.com,outlook.office.com,sharepoint.com,teams.microsoft.com,www.onenote.com,admin.microsoft.com")
@@ -118,7 +122,7 @@ func register() error {
 	}
 	defer selectbrowserkey.Close()
 
-	selectbrowserkey.SetStringValue("", "MaxOffice Select Browser")
+	selectbrowserkey.SetStringValue("", "MaxOffice SelectBrowser")
 
 	capskey, _, err := registry.CreateKey(selectbrowserkey, `Capabilities\UrlAssociations`, registry.ALL_ACCESS)
 	if err != nil {
